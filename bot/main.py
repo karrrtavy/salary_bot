@@ -15,7 +15,7 @@ from bot.database import Database
 from bot.handlers.start import start_handler, help_handler
 from bot.handlers.registration import handle_registration_key, handle_hourly_rate, handle_percent
 from bot.handlers.shifts import shifts_handler, add_shift_handler, handle_shift_date, delete_shift_handler, handle_shift_delete, show_shifts_handler
-from bot.handlers.salary import salary_handler, handle_hours_input, handle_start_revenue, handle_end_revenue, confirm_salary_handler, monthly_report_handler, current_period_handler, previous_period_handler, payment_history_handler
+from bot.handlers.salary import salary_handler, handle_hours_input, handle_start_revenue, handle_end_revenue, confirm_salary_handler, payment_history_handler, custom_period_handler, handle_period_input, payment_history_handler
 
 # Настройка логирования
 logging.basicConfig(
@@ -45,8 +45,7 @@ class SalaryBot:
         self.application.add_handler(MessageHandler(filters.Text(["💰 Расчет зарплаты"]), salary_handler))
         
         # Новые обработчики периодов
-        self.application.add_handler(MessageHandler(filters.Text(["📊 Текущий период"]), current_period_handler))
-        self.application.add_handler(MessageHandler(filters.Text(["📋 Предыдущий период"]), previous_period_handler))
+        self.application.add_handler(MessageHandler(filters.Text(["📊 Расчет за период"]), custom_period_handler))
         self.application.add_handler(MessageHandler(filters.Text(["📜 История выплат"]), payment_history_handler))
         
         self.application.add_handler(MessageHandler(filters.Text(["✅ Подтвердить"]), confirm_salary_handler))
@@ -78,6 +77,8 @@ class SalaryBot:
             await handle_start_revenue(update, context)
         elif user_data.get('awaiting_end_revenue'):
             await handle_end_revenue(update, context)
+        elif user_data.get('awaiting_period'):
+            await handle_period_input(update, context)  # Новый обработчик
         else:
             await update.message.reply_text("Используйте меню для навигации.")
 

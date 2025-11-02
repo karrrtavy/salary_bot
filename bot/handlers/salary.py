@@ -2,8 +2,8 @@ from telegram import Update
 from telegram.ext import CallbackContext
 from bot.database import Database
 from bot.utils import calculate_salary, format_salary_details, validate_hours, validate_revenue
-from bot.utils import get_current_period_dates, get_previous_period_dates, format_period_report
-from bot.keyboards import get_confirmation_keyboard, get_main_menu
+from bot.utils import validate_period_format, parse_period, format_period_report, get_suggested_periods
+from bot.keyboards import get_confirmation_keyboard, get_main_menu, get_periods_keyboard
 from bot.models import Shift
 from datetime import datetime
 
@@ -150,8 +150,8 @@ async def monthly_report_handler(update: Update, context: CallbackContext):
     
     await update.message.reply_text(report_text)
 
-async def current_period_handler(update: Update, context: CallbackContext):
-    """Показать отчет за текущий период"""
+async def custom_period_handler(update: Update, context: CallbackContext):
+    """Обработчик выбора произвольного периода"""
     user_id = update.effective_user.id
     user = db.get_user_by_id(user_id)
     
@@ -159,66 +159,97 @@ async def current_period_handler(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Сначала зарегистрируйтесь!")
         return
     
-    # Получаем данные текущего периода
-    period_info = get_current_period_dates()
+    # Получаем предложенные периоды
+    suggested_periods = get_suggested_periods()
     
-    # Получаем смены за текущий период
-    shifts = db.get_user_shifts_for_period(user_id, period_info['start_date'], period_info['end_date'])
-    
-    if not shifts:
-        await update.message.reply_text(
-            f"📭 Нет завершенных смен за текущий период "
-            f"({period_info['start_date'].strftime('%d.%m.%Y')} - {period_info['end_date'].strftime('%d.%m.%Y')})"
-        )
-        return
-    
-    # Считаем общую сумму
-    total_salary = sum(shift.calculated_salary for shift in shifts)
-    
-    # Формируем отчет
-    period_data = {
-        'period_info': period_info,
-        'shifts': shifts,
-        'total_salary': total_salary
-    }
-    
-    report = format_period_report(period_data, shifts, total_salary)
-    await update.message.reply_text(report, parse_mode='Markdown')
+    message = """
+📅 **Расчет заработка за период**
 
-async def previous_period_handler(update: Update, context: CallbackContext):
-    """Показать отчет за предыдущий период"""
-    user_id = update.effective_user.id
-    user = db.get_user_by_id(user_id)
+Введите период в формате:
+`ГГГГ.ММ.ДД-ГГГГ.ММ.ДД`
+
+Например: `2025.11.01-2025.11.10`
+
+Или выберите один из предложенных периодов:
+"""
     
-    if not user:
-        await update.message.reply_text("❌ Сначала зарегистрируйтесь!")
+    for i, period in enumerate(suggested_periods, 1):
+        start_str, end_str = period.split('-')
+        start_date = datetime.strptime(start_str, '%Y.%m.%d').date()
+        end_date = datetime.strptime(end_str, '%Y.%m.%d').date()
+        message += f"\n{i}. {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}"
+    
+    message += "\n\nПросто отправьте номер периода или введите свой в указанном формате."
+    
+    context.user_data['awaiting_period'] = True
+    context.user_data['suggested_periods'] = suggested_periods
+    
+    await update.message.reply_text(message, parse_mode='Markdown', reply_markup=get_periods_keyboard())
+
+async def handle_period_input(update: Update, context: CallbackContext):
+    """Обработчик ввода периода"""
+    user_input = update.message.text.strip()
+    suggested_periods = context.user_data.get('suggested_periods', [])
+    
+    # Проверяем, не выбрал ли пользователь номер из предложенных периодов
+    if user_input.isdigit():
+        period_num = int(user_input)
+        if 1 <= period_num <= len(suggested_periods):
+            period_str = suggested_periods[period_num - 1]
+        else:
+            await update.message.reply_text("❌ Неверный номер периода. Попробуйте еще раз:")
+            return
+    else:
+        period_str = user_input
+    
+    # Проверяем формат периода
+    if not validate_period_format(period_str):
+        await update.message.reply_text(
+            "❌ Неверный формат периода!\n\n"
+            "Используйте формат: `ГГГГ.ММ.ДД-ГГГГ.ММ.ДД`\n"
+            "Например: `2025.11.01-2025.11.10`",
+            parse_mode='Markdown'
+        )
         return
     
-    # Получаем данные предыдущего периода
-    period_info = get_previous_period_dates()
+    # Парсим период
+    period_data = parse_period(period_str)
+    if not period_data:
+        await update.message.reply_text("❌ Ошибка при разборе дат. Проверьте формат.")
+        return
     
-    # Получаем смены за предыдущий период
-    shifts = db.get_user_shifts_for_period(user_id, period_info['start_date'], period_info['end_date'])
+    user_id = update.effective_user.id
+    
+    # Получаем смены за указанный период
+    shifts = db.get_user_shifts_for_period(
+        user_id, 
+        period_data['start_date'], 
+        period_data['end_date']
+    )
     
     if not shifts:
         await update.message.reply_text(
-            f"📭 Нет завершенных смен за предыдущий период "
-            f"({period_info['start_date'].strftime('%d.%m.%Y')} - {period_info['end_date'].strftime('%d.%m.%Y')})"
+            f"📭 Нет завершенных смен за период "
+            f"{period_data['start_date'].strftime('%d.%m.%Y')} - {period_data['end_date'].strftime('%d.%m.%Y')}"
         )
+        context.user_data['awaiting_period'] = False
         return
     
     # Считаем общую сумму
     total_salary = sum(shift.calculated_salary for shift in shifts)
     
     # Формируем отчет
-    period_data = {
-        'period_info': period_info,
+    report = format_period_report(period_data, shifts, total_salary)
+    
+    # Сохраняем данные для возможного подтверждения
+    context.user_data['current_period_data'] = {
+        'period_data': period_data,
         'shifts': shifts,
         'total_salary': total_salary
     }
     
-    report = format_period_report(period_data, shifts, total_salary)
     await update.message.reply_text(report, parse_mode='Markdown')
+    context.user_data['awaiting_period'] = False
 
 async def payment_history_handler(update: Update, context: CallbackContext):
     """Показать историю выплат"""
@@ -241,8 +272,7 @@ async def payment_history_handler(update: Update, context: CallbackContext):
     for i, period in enumerate(payment_periods, 1):
         status = "✅ Выплачено" if period.is_paid else "⏳ Ожидает выплаты"
         history_text += (
-            f"{i}. Период {period.period_number}: "
-            f"{period.start_date.strftime('%d.%m')}-{period.end_date.strftime('%d.%m')}\n"
+            f"{i}. {period.start_date.strftime('%d.%m.%Y')}-{period.end_date.strftime('%d.%m.%Y')}\n"
             f"   💰 {period.total_salary:.2f} руб. | 📅 {period.payment_date.strftime('%d.%m.%Y')} | {status}\n\n"
         )
     

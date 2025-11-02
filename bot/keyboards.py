@@ -3,8 +3,8 @@ from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMar
 def get_main_menu():
     keyboard = [
         ['📅 Мои смены', '💰 Расчет зарплаты'],
-        ['📊 Текущий период', '📋 Предыдущий период'],
-        ['📜 История выплат', '❓ Помощь']
+        ['📊 Расчет за период', '📜 История выплат'],
+        ['❓ Помощь']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -29,7 +29,6 @@ def get_cancel_keyboard():
 
 def get_periods_keyboard():
     keyboard = [
-        ['📊 Текущий период', '📋 Предыдущий период'],
-        ['📜 История выплат', '🔙 Назад']
+        ['🔙 Назад']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)

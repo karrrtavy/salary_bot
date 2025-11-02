@@ -84,129 +84,133 @@ def format_salary_details(details):
 💸 Итоговый заработок: {details['total_salary']:.2f} руб.
     """
 
-def calculate_payment_date(target_day):
+def validate_period_format(period_str):
+    """Проверка формата периода ГГГГ.ММ.ДД-ГГГГ.ММ.ДД"""
+    try:
+        if '-' not in period_str:
+            return False
+        
+        start_str, end_str = period_str.split('-')
+        start_date = datetime.strptime(start_str, '%Y.%m.%d').date()
+        end_date = datetime.strptime(end_str, '%Y.%m.%d').date()
+        
+        # Проверяем что начальная дата не позже конечной
+        if start_date > end_date:
+            return False
+            
+        return True
+    except:
+        return False
+
+def parse_period(period_str):
+    """Парсинг периода из строки"""
+    try:
+        start_str, end_str = period_str.split('-')
+        start_date = datetime.strptime(start_str, '%Y.%m.%d').date()
+        end_date = datetime.strptime(end_str, '%Y.%m.%d').date()
+        
+        return {
+            'start_date': start_date,
+            'end_date': end_date,
+            'period_str': period_str
+        }
+    except:
+        return None
+
+def calculate_payment_date_for_period(end_date):
     """
-    Расчет даты выплаты по правилам:
-    - Если 10,20,30 число в сб или вс → выплата в понедельник
-    - Если 10,20,30 число с пн по пт → выплата 9,19,29 числа
+    Расчет даты выплаты для произвольного периода по правилам:
+    - Если конечная дата в сб или вс → выплата в понедельник
+    - Если конечная дата с пн по пт → выплата за день до
     """
-    today = date.today()
-    year = today.year
-    month = today.month
-    
-    # Создаем дату для 10, 20, 30 числа текущего месяца
-    target_date = date(year, month, target_day)
-    
-    # Проверяем день недели (0-пн, 1-вт, 2-ср, 3-чт, 4-пт, 5-сб, 6-вс)
-    weekday = target_date.weekday()
+    # Проверяем день недели конечной даты (0-пн, 1-вт, 2-ср, 3-чт, 4-пт, 5-сб, 6-вс)
+    weekday = end_date.weekday()
     
     if weekday >= 5:  # Суббота или воскресенье
         # Выплата в понедельник
         days_until_monday = (7 - weekday) % 7
         if days_until_monday == 0:  # Если уже понедельник
             days_until_monday = 7
-        payment_date = target_date + timedelta(days=days_until_monday)
+        payment_date = end_date + timedelta(days=days_until_monday)
     else:  # Понедельник-пятница
-        # Выплата за день до (9, 19, 29 числа)
-        payment_date = target_date - timedelta(days=1)
+        # Выплата за день до конечной даты
+        payment_date = end_date - timedelta(days=1)
     
     return payment_date
 
-def get_current_period_dates():
-    """Получить даты текущего 10-дневного периода"""
-    today = date.today()
-    day = today.day
-    
-    if 1 <= day <= 10:
-        period_number = 1
-        start_date = date(today.year, today.month, 1)
-        end_date = date(today.year, today.month, 10)
-        payment_date = calculate_payment_date(10)
-    elif 11 <= day <= 20:
-        period_number = 2
-        start_date = date(today.year, today.month, 11)
-        end_date = date(today.year, today.month, 20)
-        payment_date = calculate_payment_date(20)
-    else:  # 21-31
-        period_number = 3
-        start_date = date(today.year, today.month, 21)
-        # Определяем последний день месяца
-        if today.month == 12:
-            next_month = date(today.year + 1, 1, 1)
-        else:
-            next_month = date(today.year, today.month + 1, 1)
-        end_date = next_month - timedelta(days=1)
-        payment_date = calculate_payment_date(30)
-    
-    return {
-        'period_number': period_number,
-        'start_date': start_date,
-        'end_date': end_date,
-        'payment_date': payment_date
-    }
-
-def get_previous_period_dates():
-    """Получить даты предыдущего 10-дневного периода"""
-    today = date.today()
-    day = today.day
-    
-    if 1 <= day <= 10:
-        # Предыдущий период - последние 10 дней прошлого месяца
-        if today.month == 1:
-            prev_month = date(today.year - 1, 12, 1)
-        else:
-            prev_month = date(today.year, today.month - 1, 1)
-        
-        # Последние 10 дней прошлого месяца
-        period_number = 3
-        start_date = date(prev_month.year, prev_month.month, 21)
-        end_date = date(prev_month.year, prev_month.month, 31)
-        try:
-            end_date = date(prev_month.year, prev_month.month, 31)
-        except ValueError:
-            try:
-                end_date = date(prev_month.year, prev_month.month, 30)
-            except ValueError:
-                end_date = date(prev_month.year, prev_month.month, 29)
-        
-        payment_date = calculate_payment_date(30)
-        
-    elif 11 <= day <= 20:
-        period_number = 1
-        start_date = date(today.year, today.month, 1)
-        end_date = date(today.year, today.month, 10)
-        payment_date = calculate_payment_date(10)
-    else:  # 21-31
-        period_number = 2
-        start_date = date(today.year, today.month, 11)
-        end_date = date(today.year, today.month, 20)
-        payment_date = calculate_payment_date(20)
-    
-    return {
-        'period_number': period_number,
-        'start_date': start_date,
-        'end_date': end_date,
-        'payment_date': payment_date
-    }
-
 def format_period_report(period_data, shifts, total_salary):
     """Форматирование отчета за период"""
-    period_info = period_data['period_info']
+    start_date = period_data['start_date']
+    end_date = period_data['end_date']
+    payment_date = calculate_payment_date_for_period(end_date)
     
     report = f"""
-📅 **Отчет за период: {period_info['start_date'].strftime('%d.%m.%Y')} - {period_info['end_date'].strftime('%d.%m.%Y')}**
+📅 **Отчет за период: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}**
 
-🔄 Период: {period_info['period_number']}/3
 💰 Сумма к выплате: {total_salary:.2f} руб.
 📋 Количество смен: {len(shifts)}
-📆 Дата выплаты: {period_info['payment_date'].strftime('%d.%m.%Y')}
+📆 Дата выплаты: {payment_date.strftime('%d.%m.%Y')}
 
 📊 Детализация смен:
 """
     
     for i, shift in enumerate(shifts, 1):
-        report += f"\n{i}. {shift.date.strftime('%d.%m')} - {shift.calculated_salary:.2f} руб."
+        report += f"\n{i}. {shift.date.strftime('%d.%m.%Y')} - {shift.calculated_salary:.2f} руб."
     
     report += f"\n\n💵 **Итого: {total_salary:.2f} руб.**"
     
     return report
+
+def get_suggested_periods():
+    """Получить предложенные периоды (текущий и предыдущий месяцы)"""
+    today = date.today()
+    current_month = today.month
+    current_year = today.year
+    
+    suggested_periods = []
+    
+    # Текущий месяц - 3 периода по 10 дней
+    if current_month == 12:
+        next_year = current_year + 1
+        next_month = 1
+    else:
+        next_year = current_year
+        next_month = current_month + 1
+    
+    # Определяем последний день текущего месяца
+    last_day = (date(next_year, next_month, 1) - timedelta(days=1)).day
+    
+    periods = [
+        (1, 10),
+        (11, 20),
+        (21, last_day)
+    ]
+    
+    for start_day, end_day in periods:
+        if start_day <= last_day:  # Проверяем что период существует
+            period_str = f"{current_year}.{current_month:02d}.{start_day:02d}-{current_year}.{current_month:02d}.{end_day:02d}"
+            suggested_periods.append(period_str)
+    
+    # Предыдущий месяц
+    if current_month == 1:
+        prev_year = current_year - 1
+        prev_month = 12
+    else:
+        prev_year = current_year
+        prev_month = current_month - 1
+    
+    # Определяем последний день предыдущего месяца
+    prev_last_day = (date(current_year, current_month, 1) - timedelta(days=1)).day
+    
+    prev_periods = [
+        (1, 10),
+        (11, 20),
+        (21, prev_last_day)
+    ]
+    
+    for start_day, end_day in prev_periods:
+        if start_day <= prev_last_day:
+            period_str = f"{prev_year}.{prev_month:02d}.{start_day:02d}-{prev_year}.{prev_month:02d}.{end_day:02d}"
+            suggested_periods.append(period_str)
+    
+    return suggested_periods
