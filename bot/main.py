@@ -7,8 +7,6 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 from telegram import Update
 
-from bot.handlers.salary import current_period_handler, previous_period_handler, payment_history_handler
-
 # Добавляем текущую директорию в путь
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,7 +15,7 @@ from bot.database import Database
 from bot.handlers.start import start_handler, help_handler
 from bot.handlers.registration import handle_registration_key, handle_hourly_rate, handle_percent
 from bot.handlers.shifts import shifts_handler, add_shift_handler, handle_shift_date, delete_shift_handler, handle_shift_delete, show_shifts_handler
-from bot.handlers.salary import salary_handler, handle_hours_input, handle_start_revenue, handle_end_revenue, confirm_salary_handler, monthly_report_handler
+from bot.handlers.salary import salary_handler, handle_hours_input, handle_start_revenue, handle_end_revenue, confirm_salary_handler, monthly_report_handler, current_period_handler, previous_period_handler, payment_history_handler
 
 # Настройка логирования
 logging.basicConfig(
