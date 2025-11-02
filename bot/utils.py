@@ -2,6 +2,14 @@ from bot.config import BONUS_TABLE, MAX_HOURLY_RATE, MAX_PERCENT, MAX_HOURS, MAX
 from datetime import datetime, date, timedelta
 import re
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+def log_user_action(user_id, action, details=""):
+    """Логирование действий пользователя"""
+    logger.info(f"USER_ACTION: {user_id} | {action} | {details}")
+
 def validate_hourly_rate(rate):
     try:
         rate = float(rate)
@@ -58,6 +66,10 @@ def calculate_salary(hours, hourly_rate, percent, start_revenue, end_revenue):
     
     bonus = calculate_bonus(end_revenue)
     total_salary = base_salary + revenue_share + bonus
+    
+    # Логируем расчет зарплаты
+    logger.info(f"SALARY_CALCULATION: hours={hours}, rate={hourly_rate}, percent={percent}, "
+                f"start_rev={start_revenue}, end_rev={end_revenue}, total={total_salary}")
     
     return {
         'base_salary': base_salary,
