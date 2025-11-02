@@ -2,6 +2,7 @@ from telegram import Update
 from telegram.ext import CallbackContext
 from bot.database import Database
 from bot.utils import calculate_salary, format_salary_details, validate_hours, validate_revenue
+from bot.utils import get_current_period_dates, get_previous_period_dates, format_period_report
 from bot.keyboards import get_confirmation_keyboard, get_main_menu
 from bot.models import Shift
 from datetime import datetime
@@ -148,3 +149,101 @@ async def monthly_report_handler(update: Update, context: CallbackContext):
     report_text += f"\n💰 Итого за месяц: {total_salary:.2f} руб."
     
     await update.message.reply_text(report_text)
+
+async def current_period_handler(update: Update, context: CallbackContext):
+    """Показать отчет за текущий период"""
+    user_id = update.effective_user.id
+    user = db.get_user_by_id(user_id)
+    
+    if not user:
+        await update.message.reply_text("❌ Сначала зарегистрируйтесь!")
+        return
+    
+    # Получаем данные текущего периода
+    period_info = get_current_period_dates()
+    
+    # Получаем смены за текущий период
+    shifts = db.get_user_shifts_for_period(user_id, period_info['start_date'], period_info['end_date'])
+    
+    if not shifts:
+        await update.message.reply_text(
+            f"📭 Нет завершенных смен за текущий период "
+            f"({period_info['start_date'].strftime('%d.%m.%Y')} - {period_info['end_date'].strftime('%d.%m.%Y')})"
+        )
+        return
+    
+    # Считаем общую сумму
+    total_salary = sum(shift.calculated_salary for shift in shifts)
+    
+    # Формируем отчет
+    period_data = {
+        'period_info': period_info,
+        'shifts': shifts,
+        'total_salary': total_salary
+    }
+    
+    report = format_period_report(period_data, shifts, total_salary)
+    await update.message.reply_text(report, parse_mode='Markdown')
+
+async def previous_period_handler(update: Update, context: CallbackContext):
+    """Показать отчет за предыдущий период"""
+    user_id = update.effective_user.id
+    user = db.get_user_by_id(user_id)
+    
+    if not user:
+        await update.message.reply_text("❌ Сначала зарегистрируйтесь!")
+        return
+    
+    # Получаем данные предыдущего периода
+    period_info = get_previous_period_dates()
+    
+    # Получаем смены за предыдущий период
+    shifts = db.get_user_shifts_for_period(user_id, period_info['start_date'], period_info['end_date'])
+    
+    if not shifts:
+        await update.message.reply_text(
+            f"📭 Нет завершенных смен за предыдущий период "
+            f"({period_info['start_date'].strftime('%d.%m.%Y')} - {period_info['end_date'].strftime('%d.%m.%Y')})"
+        )
+        return
+    
+    # Считаем общую сумму
+    total_salary = sum(shift.calculated_salary for shift in shifts)
+    
+    # Формируем отчет
+    period_data = {
+        'period_info': period_info,
+        'shifts': shifts,
+        'total_salary': total_salary
+    }
+    
+    report = format_period_report(period_data, shifts, total_salary)
+    await update.message.reply_text(report, parse_mode='Markdown')
+
+async def payment_history_handler(update: Update, context: CallbackContext):
+    """Показать историю выплат"""
+    user_id = update.effective_user.id
+    user = db.get_user_by_id(user_id)
+    
+    if not user:
+        await update.message.reply_text("❌ Сначала зарегистрируйтесь!")
+        return
+    
+    # Получаем историю выплат
+    payment_periods = db.get_user_payment_periods(user_id)
+    
+    if not payment_periods:
+        await update.message.reply_text("📭 У вас еще нет завершенных периодов выплат.")
+        return
+    
+    history_text = "📋 **История выплат:**\n\n"
+    
+    for i, period in enumerate(payment_periods, 1):
+        status = "✅ Выплачено" if period.is_paid else "⏳ Ожидает выплаты"
+        history_text += (
+            f"{i}. Период {period.period_number}: "
+            f"{period.start_date.strftime('%d.%m')}-{period.end_date.strftime('%d.%m')}\n"
+            f"   💰 {period.total_salary:.2f} руб. | 📅 {period.payment_date.strftime('%d.%m.%Y')} | {status}\n\n"
+        )
+    
+    await update.message.reply_text(history_text, parse_mode='Markdown')

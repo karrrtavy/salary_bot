@@ -7,6 +7,8 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 from telegram import Update
 
+from bot.handlers.salary import current_period_handler, previous_period_handler, payment_history_handler
+
 # Добавляем текущую директорию в путь
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -43,7 +45,12 @@ class SalaryBot:
         self.application.add_handler(MessageHandler(filters.Text(["📋 Мои смены"]), show_shifts_handler))
         self.application.add_handler(MessageHandler(filters.Text(["🔙 Назад"]), start_handler))
         self.application.add_handler(MessageHandler(filters.Text(["💰 Расчет зарплаты"]), salary_handler))
-        self.application.add_handler(MessageHandler(filters.Text(["📊 Отчет за месяц"]), monthly_report_handler))
+        
+        # Новые обработчики периодов
+        self.application.add_handler(MessageHandler(filters.Text(["📊 Текущий период"]), current_period_handler))
+        self.application.add_handler(MessageHandler(filters.Text(["📋 Предыдущий период"]), previous_period_handler))
+        self.application.add_handler(MessageHandler(filters.Text(["📜 История выплат"]), payment_history_handler))
+        
         self.application.add_handler(MessageHandler(filters.Text(["✅ Подтвердить"]), confirm_salary_handler))
         self.application.add_handler(MessageHandler(filters.Text(["✏️ Изменить"]), salary_handler))
         self.application.add_handler(MessageHandler(filters.Text(["❌ Отмена"]), start_handler))

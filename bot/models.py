@@ -41,3 +41,17 @@ class Shift(Base):
     calculated_salary = Column(Float)
     is_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class PaymentPeriod(Base):
+    __tablename__ = 'payment_periods'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer)
+    period_number = Column(Integer)  # 1, 2, 3 для 10, 20, 30 дней
+    start_date = Column(Date)
+    end_date = Column(Date)
+    payment_date = Column(Date)  # Дата когда должна быть выплата
+    total_salary = Column(Float)
+    shifts_count = Column(Integer)
+    is_paid = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
