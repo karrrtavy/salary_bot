@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  salary-bot:
+    build: .
+    container_name: salary-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - DATABASE_URL=sqlite:///data/bot.db
+    volumes:
+      - bot_data:/app/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bot_data:
