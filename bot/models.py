@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Boolean, Text
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, date
 import json
@@ -35,13 +35,17 @@ class Shift(Base):
     user_id = Column(Integer)
     date = Column(Date)
     hours_worked = Column(Float)
-    shift_type = Column(String)  # '8-20', '8-21', '9-21', '9-20', 'custom'
+    shift_type = Column(String)  # Новое поле: тип смены
     start_revenue = Column(Float)
     end_revenue = Column(Float)
-    break_start_revenue = Column(Float)  # Выручка при уходе на перерыв
-    break_end_revenue = Column(Float)    # Выручка при возвращении с перерыва
-    total_revenue = Column(Float)        # Общая выручка за смену
-    salary_details = Column(Text)  # JSON с детализацией
+    # Новые поля для 2% пользователей
+    revenue_come1 = Column(Float)    # Выручка при приходе
+    revenue_leave1 = Column(Float)   # Выручка при уходе (первый раз)
+    revenue_come2 = Column(Float)    # Выручка при возвращении
+    revenue_leave2 = Column(Float)   # Выручка при окончательном уходе
+    total_revenue = Column(Float)    # Общая выручка (для смен до 21:00)
+    had_break = Column(Boolean)      # Был ли перерыв
+    salary_details = Column(String)  # JSON с детализацией
     calculated_salary = Column(Float)
     is_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

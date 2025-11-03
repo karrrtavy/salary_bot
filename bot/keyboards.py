@@ -1,6 +1,5 @@
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
-from bot.config import SHIFT_TYPES
 
 def get_main_menu():
     keyboard = [
@@ -39,12 +38,14 @@ def get_shift_selection_keyboard(shifts):
     """Клавиатура для выбора смены для расчета"""
     keyboard = []
     
+    # Добавляем кнопку "Сегодня" если есть смена на сегодня
     today = datetime.now().date()
     today_shift = next((shift for shift in shifts if shift.date == today and not shift.is_completed), None)
     
     if today_shift:
         keyboard.append(['📅 Смена за сегодня'])
     
+    # Добавляем кнопки для предыдущих смен (максимум 5)
     previous_shifts = [shift for shift in shifts if shift.date < today and not shift.is_completed][:5]
     
     for shift in previous_shifts:
@@ -54,14 +55,19 @@ def get_shift_selection_keyboard(shifts):
     
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-def get_shift_types_keyboard():
+def get_shift_type_keyboard():
     """Клавиатура для выбора типа смены (для 2% пользователей)"""
-    keyboard = []
-    
-    for shift_type in SHIFT_TYPES.keys():
-        hours = SHIFT_TYPES[shift_type]['hours']
-        keyboard.append([f"{shift_type} ({hours} часов)"])
-    
-    keyboard.append(['🔙 Назад'])
-    
+    keyboard = [
+        ['🕗 8:00-20:00', '🕗 8:00-21:00'],
+        ['🕘 9:00-20:00', '🕘 9:00-21:00'],
+        ['🔙 Назад']
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+def get_break_question_keyboard():
+    """Клавиатура для вопроса об уходе со смены"""
+    keyboard = [
+        ['✅ Да, уходил', '❌ Нет, не уходил'],
+        ['🔙 Назад']
+    ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
