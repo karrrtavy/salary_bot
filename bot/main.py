@@ -16,6 +16,7 @@ from bot.handlers.start import start_handler, help_handler
 from bot.handlers.registration import handle_registration_key, handle_hourly_rate, handle_percent
 from bot.handlers.shifts import shifts_handler, add_shift_handler, handle_shift_date, delete_shift_handler, handle_shift_delete, show_shifts_handler
 from bot.handlers.salary import salary_handler, handle_hours_input, handle_start_revenue, handle_end_revenue, confirm_salary_handler, payment_history_handler, custom_period_handler, handle_period_input, payment_history_handler, handle_shift_selection
+from bot.models import User, Shift
 
 # Настройка логирования
 logging.basicConfig(
@@ -39,8 +40,8 @@ def check_database_connection():
         session = db.get_session()
         
         # Простая проверка - считаем пользователей
-        user_count = session.query(db.models.User).count()
-        shift_count = session.query(db.models.Shift).count()
+        user_count = session.query(User).count()
+        shift_count = session.query(Shift).count()
         
         logger.info(f"✅ База данных подключена")
         logger.info(f"👥 Пользователей в системе: {user_count}")
