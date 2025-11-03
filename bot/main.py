@@ -15,7 +15,7 @@ from bot.database import Database
 from bot.handlers.start import start_handler, help_handler
 from bot.handlers.registration import handle_registration_key, handle_hourly_rate, handle_percent
 from bot.handlers.shifts import shifts_handler, add_shift_handler, handle_shift_date, delete_shift_handler, handle_shift_delete, show_shifts_handler
-from bot.handlers.salary import salary_handler, handle_hours_input, handle_start_revenue, handle_end_revenue, confirm_salary_handler, payment_history_handler, custom_period_handler, handle_period_input, payment_history_handler
+from bot.handlers.salary import salary_handler, handle_hours_input, handle_start_revenue, handle_end_revenue, confirm_salary_handler, payment_history_handler, custom_period_handler, handle_period_input, payment_history_handler, handle_shift_selection
 
 # Настройка логирования
 logging.basicConfig(
@@ -51,6 +51,10 @@ class SalaryBot:
         self.application.add_handler(MessageHandler(filters.Text(["📋 Мои смены"]), self.wrapped_show_shifts_handler))
         self.application.add_handler(MessageHandler(filters.Text(["🔙 Назад"]), self.wrapped_start_handler))
         self.application.add_handler(MessageHandler(filters.Text(["💰 Расчет зарплаты"]), self.wrapped_salary_handler))
+        
+        # Новые обработчики выбора смены
+        self.application.add_handler(MessageHandler(filters.Text(["📅 Смена за сегодня"]), self.wrapped_shift_selection))
+        self.application.add_handler(MessageHandler(filters.Regex(r'^📋 \d{2}\.\d{2}\.\d{4}$'), self.wrapped_shift_selection))
         
         # Новые обработчики периодов
         self.application.add_handler(MessageHandler(filters.Text(["📊 Расчет за период"]), self.wrapped_custom_period_handler))
@@ -94,6 +98,10 @@ class SalaryBot:
     async def wrapped_salary_handler(self, update: Update, context: CallbackContext):
         await salary_handler(update, context)
         log_command(update.effective_user, "salary_calculation")
+
+    async def wrapped_shift_selection(self, update: Update, context: CallbackContext):
+        await handle_shift_selection(update, context)
+        log_command(update.effective_user, "shift_selection")
 
     async def wrapped_custom_period_handler(self, update: Update, context: CallbackContext):
         await custom_period_handler(update, context)

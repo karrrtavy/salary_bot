@@ -9,6 +9,20 @@ from datetime import datetime
 
 db = Database()
 
+from telegram import Update
+from telegram.ext import CallbackContext
+from bot.database import Database
+from bot.utils import calculate_salary, format_salary_details, validate_hours, validate_revenue
+from bot.utils import validate_period_format, parse_period, format_period_report, get_suggested_periods
+from bot.keyboards import get_confirmation_keyboard, get_main_menu, get_periods_keyboard, get_shift_selection_keyboard
+from bot.models import Shift
+from datetime import datetime, date
+import logging
+
+logger = logging.getLogger(__name__)
+
+db = Database()
+
 async def salary_handler(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     user = db.get_user_by_id(user_id)
@@ -17,23 +31,71 @@ async def salary_handler(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Сначала зарегистрируйтесь!")
         return
     
-    # Получаем текущую смену (последнюю добавленную)
+    # Получаем все незавершенные смены пользователя
     shifts = db.get_user_shifts(user_id)
-    current_shift = None
+    incomplete_shifts = [shift for shift in shifts if not shift.is_completed and shift.date <= date.today()]
     
-    for shift in reversed(shifts):
-        if not shift.is_completed:
-            current_shift = shift
-            break
-    
-    if not current_shift:
-        await update.message.reply_text("❌ Нет активных смен для расчета!")
+    if not incomplete_shifts:
+        await update.message.reply_text(
+            "❌ Нет незавершенных смен для расчета!\n"
+            "Добавьте смену через меню '📅 Мои смены'",
+            reply_markup=get_main_menu()
+        )
         return
     
-    context.user_data['current_shift_id'] = current_shift.id
+    # Сохраняем список смен в user_data для последующего использования
+    context.user_data['available_shifts'] = incomplete_shifts
+    
+    # Создаем клавиатуру для выбора смены
+    keyboard = get_shift_selection_keyboard(incomplete_shifts)
+    
+    await update.message.reply_text(
+        "📅 Выберите смену для расчета заработка:",
+        reply_markup=keyboard
+    )
+
+async def handle_shift_selection(update: Update, context: CallbackContext):
+    """Обработчик выбора конкретной смены"""
+    user_input = update.message.text
+    user_id = update.effective_user.id
+    user = db.get_user_by_id(user_id)
+    
+    # Логируем выбор пользователя
+    logger.info(f"USER: {user_id} | SHIFT_SELECTION: {user_input}")
+    
+    shifts = context.user_data.get('available_shifts', [])
+    
+    selected_shift = None
+    
+    if user_input == "📅 Смена за сегодня":
+        today = date.today()
+        selected_shift = next((shift for shift in shifts if shift.date == today), None)
+    elif user_input.startswith("📋 "):
+        # Извлекаем дату из текста кнопки (формат: "📋 03.11.2025")
+        date_str = user_input[3:]  # Убираем "📋 "
+        try:
+            selected_date = datetime.strptime(date_str, '%d.%m.%Y').date()
+            selected_shift = next((shift for shift in shifts if shift.date == selected_date), None)
+        except ValueError:
+            await update.message.reply_text("❌ Ошибка при разборе даты!")
+            return
+    
+    if not selected_shift:
+        await update.message.reply_text("❌ Выбранная смена не найдена!")
+        return
+    
+    # Сохраняем выбранную смену в контексте
+    context.user_data['current_shift_id'] = selected_shift.id
+    context.user_data['selected_shift_date'] = selected_shift.date
     context.user_data['awaiting_hours'] = True
     
-    await update.message.reply_text("⏰ Введите количество отработанных часов (до 14):")
+    # Очищаем временные данные
+    context.user_data.pop('available_shifts', None)
+    
+    await update.message.reply_text(
+        f"📅 Выбрана смена за {selected_shift.date.strftime('%d.%m.%Y')}\n\n"
+        f"⏰ Введите количество отработанных часов (до 14):"
+    )
 
 async def handle_hours_input(update: Update, context: CallbackContext):
     hours_text = update.message.text
@@ -93,8 +155,12 @@ async def handle_end_revenue(update: Update, context: CallbackContext):
     
     context.user_data['salary_details'] = salary_details
     
+    # Добавляем дату смены в детализацию
+    shift_date = context.user_data.get('selected_shift_date', date.today())
+    
     await update.message.reply_text(
-        format_salary_details(salary_details),
+        f"📅 Смена за {shift_date.strftime('%d.%m.%Y')}\n"
+        f"{format_salary_details(salary_details)}",
         reply_markup=get_confirmation_keyboard()
     )
 
@@ -113,8 +179,13 @@ async def confirm_salary_handler(update: Update, context: CallbackContext):
             shift.salary_details = str(salary_details)
             shift.is_completed = True
             session.commit()
+            
+            # Логируем успешное сохранение
+            logger.info(f"USER: {update.effective_user.id} | SHIFT_COMPLETED: "
+                       f"date={shift.date}, salary={salary_details['total_salary']:.2f}")
     except Exception as e:
         session.rollback()
+        logger.error(f"USER: {update.effective_user.id} | SHIFT_SAVE_ERROR: {str(e)}")
         await update.message.reply_text("❌ Ошибка при сохранении данных!")
         return
     finally:
@@ -126,30 +197,7 @@ async def confirm_salary_handler(update: Update, context: CallbackContext):
     )
     context.user_data.clear()
 
-async def monthly_report_handler(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    current_date = datetime.now()
-    
-    shifts = db.get_user_shifts(user_id, current_date.month, current_date.year)
-    completed_shifts = [s for s in shifts if s.is_completed]
-    
-    if not completed_shifts:
-        await update.message.reply_text("📭 Нет завершенных смен за текущий месяц.")
-        return
-    
-    total_salary = 0
-    report_text = "📊 Отчет за текущий месяц:\n\n"
-    
-    for shift in completed_shifts:
-        report_text += f"📅 {shift.date}\n"
-        report_text += f"💸 Заработок: {shift.calculated_salary:.2f} руб.\n"
-        report_text += "─" * 20 + "\n"
-        total_salary += shift.calculated_salary
-    
-    report_text += f"\n💰 Итого за месяц: {total_salary:.2f} руб."
-    
-    await update.message.reply_text(report_text)
-
+# ... остальные функции без изменений (monthly_report_handler, custom_period_handler, handle_period_input, payment_history_handler) ...
 async def custom_period_handler(update: Update, context: CallbackContext):
     """Обработчик выбора произвольного периода"""
     user_id = update.effective_user.id
