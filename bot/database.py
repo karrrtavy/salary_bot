@@ -1,28 +1,61 @@
-from sqlalchemy import create_engine, extract, and_, desc
+from sqlalchemy import create_engine, extract, and_, desc, inspect
 from sqlalchemy.orm import sessionmaker
 from .config import DATABASE_URL
 from .models import Base, User, RegistrationKey, Shift, PaymentPeriod
 import secrets
 from datetime import datetime, date
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
         self.engine = create_engine(DATABASE_URL)
-        Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+        
+        # НЕ создаем таблицы автоматически - проверяем существующие
+        self._safe_initialize()
         self._initialize_keys()
 
+    def _safe_initialize(self):
+        """Безопасная инициализация - создает только отсутствующие таблицы"""
+        inspector = inspect(self.engine)
+        existing_tables = inspector.get_table_names()
+        
+        logger.info(f"🔍 Найдены таблицы: {existing_tables}")
+        
+        # Список необходимых таблиц
+        required_tables = ['users', 'registration_keys', 'shifts', 'payment_periods']
+        missing_tables = [table for table in required_tables if table not in existing_tables]
+        
+        if missing_tables:
+            logger.info(f"📋 Создаем отсутствующие таблицы: {missing_tables}")
+            # Создаем только отсутствующие таблицы
+            Base.metadata.create_all(self.engine, tables=[
+                Base.metadata.tables[table] for table in missing_tables
+            ])
+        else:
+            logger.info("✅ Все таблицы уже существуют")
+
     def _initialize_keys(self):
-        """Инициализация 10 ключей при первом запуске"""
+        """Инициализация ключей только если их нет"""
         session = self.Session()
         try:
-            existing_keys = session.query(RegistrationKey).count()
+            existing_keys = session.query(RegistrationKey).filter_by(is_used=False).count()
             if existing_keys == 0:
+                logger.info("🔑 Создаем 10 регистрационных ключей...")
                 for _ in range(10):
                     key = secrets.token_hex(4).upper()
                     reg_key = RegistrationKey(key=key)
                     session.add(reg_key)
                 session.commit()
+                logger.info("✅ 10 ключей создано")
+            else:
+                logger.info(f"🔑 Найдено {existing_keys} неиспользованных ключей")
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка при инициализации ключей: {str(e)}")
+            session.rollback()
         finally:
             session.close()
 

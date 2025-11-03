@@ -32,8 +32,33 @@ def log_command(user, command, response="OK"):
     """Логирование команд пользователя"""
     logger.info(f"USER: {user.id} ({user.first_name} @{user.username}) | COMMAND: {command} | RESPONSE: {response}")
 
+def check_database_connection():
+    """Проверяем подключение к БД перед запуском"""
+    try:
+        db = Database()
+        session = db.get_session()
+        
+        # Простая проверка - считаем пользователей
+        user_count = session.query(db.models.User).count()
+        shift_count = session.query(db.models.Shift).count()
+        
+        logger.info(f"✅ База данных подключена")
+        logger.info(f"👥 Пользователей в системе: {user_count}")
+        logger.info(f"📅 Смен в системе: {shift_count}")
+        
+        session.close()
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка подключения к БД: {e}")
+        return False
+
 class SalaryBot:
     def __init__(self):
+        # Проверяем БД перед созданием приложения
+        if not check_database_connection():
+            raise Exception("Database connection failed")
+            
         self.application = Application.builder().token(BOT_TOKEN).build()
         self.db = Database()
         self.setup_handlers()
