@@ -300,7 +300,7 @@ async def handle_period_input(update: Update, context: CallbackContext):
     context.user_data['awaiting_period'] = False
 
 async def payment_history_handler(update: Update, context: CallbackContext):
-    """Показать историю выплат"""
+    """Показать историю завершенных смен (последние 20)"""
     user_id = update.effective_user.id
     user = db.get_user_by_id(user_id)
     
@@ -308,20 +308,36 @@ async def payment_history_handler(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Сначала зарегистрируйтесь!")
         return
     
-    # Получаем историю выплат
-    payment_periods = db.get_user_payment_periods(user_id)
+    # Получаем последние 20 завершенных смен используя новый метод
+    completed_shifts = db.get_completed_shifts(user_id, limit=20)
     
-    if not payment_periods:
-        await update.message.reply_text("📭 У вас еще нет завершенных периодов выплат.")
+    if not completed_shifts:
+        await update.message.reply_text(
+            "📭 У вас еще нет завершенных смен.\n\n"
+            "После расчета заработка за смену они появятся в истории."
+        )
         return
     
-    history_text = "📋 **История выплат:**\n\n"
+    history_text = "📋 **История завершенных смен:**\n\n"
     
-    for i, period in enumerate(payment_periods, 1):
-        status = "✅ Выплачено" if period.is_paid else "⏳ Ожидает выплаты"
+    total_earned = 0
+    for i, shift in enumerate(completed_shifts, 1):
         history_text += (
-            f"{i}. {period.start_date.strftime('%d.%m.%Y')}-{period.end_date.strftime('%d.%m.%Y')}\n"
-            f"   💰 {period.total_salary:.2f} руб. | 📅 {period.payment_date.strftime('%d.%m.%Y')} | {status}\n\n"
+            f"{i}. 📅 {shift.date.strftime('%d.%m.%Y')}\n"
+            f"   ⏰ Часов: {shift.hours_worked} | 💰 Заработок: {shift.calculated_salary:.2f} руб.\n"
         )
+        
+        # Добавляем детали по выручке если есть данные
+        if shift.start_revenue > 0 or shift.end_revenue > 0:
+            if user.percent == 1:
+                history_text += f"   💵 Выручка: {shift.end_revenue:.2f} руб.\n"
+            else:
+                history_text += f"   💵 Выручка: {shift.start_revenue:.2f} → {shift.end_revenue:.2f} руб.\n"
+        
+        history_text += "   " + "─" * 30 + "\n\n"
+        total_earned += shift.calculated_salary
+    
+    # Добавляем общую статистику
+    history_text += f"💰 **Всего заработано за {len(completed_shifts)} смен: {total_earned:.2f} руб.**"
     
     await update.message.reply_text(history_text, parse_mode='Markdown')

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, extract
+from sqlalchemy import create_engine, extract, and_, desc
 from sqlalchemy.orm import sessionmaker
 from .config import DATABASE_URL
 from .models import Base, User, RegistrationKey, Shift, PaymentPeriod
@@ -71,6 +71,17 @@ class Database:
         finally:
             session.close()
 
+    def get_completed_shifts(self, user_id, limit=20):
+        """Получить завершенные смены пользователя (последние limit)"""
+        session = self.Session()
+        try:
+            return session.query(Shift).filter(
+                Shift.user_id == user_id,
+                Shift.is_completed == True
+            ).order_by(Shift.date.desc()).limit(limit).all()
+        finally:
+            session.close()
+
     def delete_old_shifts(self):
         """Удаление смен прошлых месяцев"""
         session = self.Session()
@@ -128,7 +139,7 @@ class Database:
             session.close()
 
     def get_payment_period_by_date(self, user_id, period_date):
-        """Получить период выплаты по дате"""
+        """Получить период выплаты по дате смены"""
         session = self.Session()
         try:
             return session.query(PaymentPeriod).filter(
@@ -136,5 +147,17 @@ class Database:
                 PaymentPeriod.start_date <= period_date,
                 PaymentPeriod.end_date >= period_date
             ).first()
+        finally:
+            session.close()
+
+    def get_payment_periods_by_month(self, user_id, month, year):
+        """Получить периоды выплат за конкретный месяц"""
+        session = self.Session()
+        try:
+            return session.query(PaymentPeriod).filter(
+                PaymentPeriod.user_id == user_id,
+                extract('month', PaymentPeriod.start_date) == month,
+                extract('year', PaymentPeriod.start_date) == year
+            ).order_by(PaymentPeriod.period_number).all()
         finally:
             session.close()
