@@ -7,14 +7,7 @@ services:
     restart: unless-stopped
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
-      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME}
-      - DB_HOST=postgres
-      - DB_PORT=5432
-    depends_on:
-      - postgres
+      - DATABASE_URL=sqlite:///data/bot.db
     volumes:
       - bot_data:/app/data
     logging:
@@ -23,25 +16,5 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  postgres:
-    image: postgres:15
-    container_name: postgres-db
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=${DB_NAME}
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-      - POSTGRES_HOST_AUTH_METHOD=trust
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 volumes:
   bot_data:
-  postgres_data:
