@@ -15,7 +15,7 @@ from bot.database import Database
 from bot.handlers.start import start_handler, help_handler
 from bot.handlers.registration import handle_registration_key, handle_hourly_rate, handle_percent
 from bot.handlers.shifts import shifts_handler, add_shift_handler, handle_shift_date, delete_shift_handler, handle_shift_delete, show_shifts_handler
-from bot.handlers.salary import salary_handler, handle_hours_input, handle_start_revenue, handle_end_revenue, confirm_salary_handler, payment_history_handler, custom_period_handler, handle_period_input, payment_history_handler, handle_shift_selection, handle_shift_type_selection, handle_break_question, handle_revenue_come1, handle_revenue_come2, handle_total_revenue, handle_revenue_leave1, handle_revenue_leave2
+from bot.handlers.salary import salary_handler, handle_hours_input, handle_start_revenue, handle_end_revenue, confirm_salary_handler, payment_history_handler, custom_period_handler, handle_period_input, payment_history_handler, handle_shift_selection
 from bot.models import User, Shift
 
 # Настройка логирования
@@ -96,24 +96,6 @@ class SalaryBot:
             self.handle_dynamic_input
         ))
 
-            # Новые обработчики для типов смен
-        self.application.add_handler(MessageHandler(filters.Text([
-            '🕗 8:00-20:00', '🕗 8:00-21:00', '🕘 9:00-20:00', '🕘 9:00-21:00'
-        ]), self.wrapped_shift_type_selection))
-
-        # Обработчики для вопросов о перерыве
-        self.application.add_handler(MessageHandler(filters.Text([
-            '✅ Да, уходил', '❌ Нет, не уходил'
-        ]), self.wrapped_break_question))
-
-    async def wrapped_shift_type_selection(self, update: Update, context: CallbackContext):
-        await handle_shift_type_selection(update, context)
-        log_command(update.effective_user, "shift_type_selection")
-
-    async def wrapped_break_question(self, update: Update, context: CallbackContext):
-        await handle_break_question(update, context)
-        log_command(update.effective_user, "break_question")
-
     # Обертки для логирования
     async def wrapped_start_handler(self, update: Update, context: CallbackContext):
         await start_handler(update, context)
@@ -159,50 +141,35 @@ class SalaryBot:
         await confirm_salary_handler(update, context)
         log_command(update.effective_user, "confirm_salary")
 
-async def handle_dynamic_input(self, update: Update, context: CallbackContext):
-    user_data = context.user_data
-    user_input = update.message.text
-    
-    # Логируем ввод пользователя
-    user = update.effective_user
-    logger.info(f"USER: {user.id} ({user.first_name} @{user.username}) | INPUT: {user_input}")
-    
-    # Добавляем новые состояния в правильном порядке
-    if user_data.get('awaiting_shift_type'):
-        await handle_shift_type_selection(update, context)
-    elif user_data.get('awaiting_break_question'):
-        await handle_break_question(update, context)
-    elif user_data.get('awaiting_revenue_come1'):
-        await handle_revenue_come1(update, context)
-    elif user_data.get('awaiting_revenue_leave1'):
-        await handle_revenue_leave1(update, context)
-    elif user_data.get('awaiting_revenue_come2'):
-        await handle_revenue_come2(update, context)
-    elif user_data.get('awaiting_revenue_leave2'):
-        await handle_revenue_leave2(update, context)
-    elif user_data.get('awaiting_total_revenue'):
-        await handle_total_revenue(update, context)
-    elif user_data.get('awaiting_key'):
-        await handle_registration_key(update, context)
-    elif user_data.get('awaiting_rate'):
-        await handle_hourly_rate(update, context)
-    elif user_data.get('awaiting_percent'):
-        await handle_percent(update, context)
-    elif user_data.get('awaiting_shift_date'):
-        await handle_shift_date(update, context)
-    elif user_data.get('awaiting_shift_delete'):
-        await handle_shift_delete(update, context)
-    elif user_data.get('awaiting_hours'):
-        await handle_hours_input(update, context)
-    elif user_data.get('awaiting_start_revenue'):
-        await handle_start_revenue(update, context)
-    elif user_data.get('awaiting_end_revenue'):
-        await handle_end_revenue(update, context)
-    elif user_data.get('awaiting_period'):
-        await handle_period_input(update, context)
-    else:
-        logger.info(f"USER: {user.id} | UNKNOWN_COMMAND: {user_input}")
-        await update.message.reply_text("Используйте меню для навигации.")
+    async def handle_dynamic_input(self, update: Update, context: CallbackContext):
+        user_data = context.user_data
+        user_input = update.message.text
+        
+        # Логируем ввод пользователя
+        user = update.effective_user
+        logger.info(f"USER: {user.id} ({user.first_name} @{user.username}) | INPUT: {user_input}")
+        
+        if user_data.get('awaiting_key'):
+            await handle_registration_key(update, context)
+        elif user_data.get('awaiting_rate'):
+            await handle_hourly_rate(update, context)
+        elif user_data.get('awaiting_percent'):
+            await handle_percent(update, context)
+        elif user_data.get('awaiting_shift_date'):
+            await handle_shift_date(update, context)
+        elif user_data.get('awaiting_shift_delete'):
+            await handle_shift_delete(update, context)
+        elif user_data.get('awaiting_hours'):
+            await handle_hours_input(update, context)
+        elif user_data.get('awaiting_start_revenue'):
+            await handle_start_revenue(update, context)
+        elif user_data.get('awaiting_end_revenue'):
+            await handle_end_revenue(update, context)
+        elif user_data.get('awaiting_period'):
+            await handle_period_input(update, context)
+        else:
+            logger.info(f"USER: {user.id} | UNKNOWN_COMMAND: {user_input}")
+            await update.message.reply_text("Используйте меню для навигации.")
 
     def run(self):
         """Запуск бота"""

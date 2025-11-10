@@ -1,14 +1,12 @@
 from telegram import Update
 from telegram.ext import CallbackContext
 from bot.database import Database
-from bot.utils import calculate_salary, format_salary_details, validate_hours, validate_revenue, SHIFT_TYPES
+from bot.utils import calculate_salary, format_salary_details, validate_hours, validate_revenue
 from bot.utils import validate_period_format, parse_period, format_period_report, get_suggested_periods
-from bot.keyboards import get_confirmation_keyboard, get_main_menu, get_periods_keyboard, get_shift_selection_keyboard, get_shift_type_keyboard, get_break_question_keyboard
+from bot.keyboards import get_confirmation_keyboard, get_main_menu, get_periods_keyboard, get_shift_selection_keyboard
 from bot.models import Shift
 from datetime import datetime, date
 import logging
-from bot.handlers.registration import handle_registration_key, handle_hourly_rate, handle_percent
-from bot.handlers.shifts import handle_shift_date, handle_shift_delete
 
 logger = logging.getLogger(__name__)
 
@@ -78,283 +76,15 @@ async def handle_shift_selection(update: Update, context: CallbackContext):
     # Сохраняем выбранную смену в контексте
     context.user_data['current_shift_id'] = selected_shift.id
     context.user_data['selected_shift_date'] = selected_shift.date
-    
-    # Для пользователей с 2% предлагаем выбрать тип смены
-    if user.percent == 2:
-        context.user_data['awaiting_shift_type'] = True
-        await update.message.reply_text(
-            "🕐 Выберите тип вашей смены:",
-            reply_markup=get_shift_type_keyboard()
-        )
-    else:
-        # Для 1% пользователей старая логика
-        context.user_data['awaiting_hours'] = True
-        await update.message.reply_text(
-            f"📅 Выбрана смена за {selected_shift.date.strftime('%d.%m.%Y')}\n\n"
-            f"⏰ Введите количество отработанных часов (до 14):"
-        )
-
-async def handle_shift_type_selection(update: Update, context: CallbackContext):
-    """Обработчик выбора типа смены для 2% пользователей"""
-    user_input = update.message.text
-    user_id = update.effective_user.id
-    
-    # Маппинг текста кнопок на типы смен
-    shift_type_map = {
-        '🕗 8:00-20:00': '8_20',
-        '🕗 8:00-21:00': '8_21', 
-        '🕘 9:00-20:00': '9_20',
-        '🕘 9:00-21:00': '9_21'
-    }
-    
-    if user_input not in shift_type_map:
-        await update.message.reply_text("❌ Пожалуйста, выберите тип смены из предложенных вариантов:")
-        return
-    
-    shift_type = shift_type_map[user_input]
-    context.user_data['shift_type'] = shift_type
-    context.user_data['awaiting_shift_type'] = False
-    
-    # Для смены 8-20 спрашиваем об уходе со смены
-    if shift_type == '8_20':
-        context.user_data['awaiting_break_question'] = True
-        await update.message.reply_text(
-            "🔄 Уходили ли вы со смены на обед/перерыв?",
-            reply_markup=get_break_question_keyboard()
-        )
-    else:
-        # Для других типов смен переходим к вводу часов
-        context.user_data['awaiting_hours'] = True
-        suggested_hours = SHIFT_TYPES[shift_type]['hours']
-        await update.message.reply_text(
-            f"⏰ Введите количество отработанных часов (рекомендуется {suggested_hours}):"
-        )
-
-async def handle_break_question(update: Update, context: CallbackContext):
-    """Обработчик ответа на вопрос об уходе со смены"""
-    user_input = update.message.text
-    user_id = update.effective_user.id
-    
-    if user_input == '✅ Да, уходил':
-        context.user_data['had_break'] = True
-        context.user_data['awaiting_revenue_come1'] = True
-        await update.message.reply_text("💵 Введите выручку при приходе на смену:")
-    elif user_input == '❌ Нет, не уходил':
-        context.user_data['had_break'] = False
-        context.user_data['awaiting_hours'] = True
-        suggested_hours = SHIFT_TYPES[context.user_data['shift_type']]['hours']
-        await update.message.reply_text(
-            f"⏰ Введите количество отработанных часов (рекомендуется {suggested_hours}):"
-        )
-    else:
-        await update.message.reply_text("❌ Пожалуйста, ответьте да или нет:")
-        return
-    
-    context.user_data['awaiting_break_question'] = False
-
-# Добавляем новые обработчики для ввода выручки для 2% пользователей
-async def handle_revenue_come1(update: Update, context: CallbackContext):
-    """Обработчик ввода первой выручки при приходе"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['revenue_come1'] = float(revenue_text)
-    context.user_data['awaiting_revenue_come1'] = False
-    context.user_data['awaiting_revenue_leave1'] = True
-    
-    await update.message.reply_text("💵 Введите выручку при уходе на перерыв:")
-
-async def handle_revenue_leave1(update: Update, context: CallbackContext):
-    """Обработчик ввода выручки при уходе"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['revenue_leave1'] = float(revenue_text)
-    context.user_data['awaiting_revenue_leave1'] = False
-    context.user_data['awaiting_revenue_come2'] = True
-    
-    await update.message.reply_text("💵 Введите выручку при возвращении с перерыва:")
-
-async def handle_revenue_come2(update: Update, context: CallbackContext):
-    """Обработчик ввода выручки при возвращении"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['revenue_come2'] = float(revenue_text)
-    context.user_data['awaiting_revenue_come2'] = False
-    
-    shift_type = context.user_data.get('shift_type')
-    
-    if shift_type == '8_20':
-        context.user_data['awaiting_revenue_leave2'] = True
-        await update.message.reply_text("💵 Введите выручку при окончательном уходе:")
-    else:
-        context.user_data['awaiting_total_revenue'] = True
-        await update.message.reply_text("💵 Введите общую выручку за смену:")
-
-async def handle_revenue_leave2(update: Update, context: CallbackContext):
-    """Обработчик ввода окончательной выручки для смены 8-20"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['revenue_leave2'] = float(revenue_text)
-    context.user_data['awaiting_revenue_leave2'] = False
     context.user_data['awaiting_hours'] = True
     
-    await update.message.reply_text("⏰ Введите количество отработанных часов:")
-
-async def handle_total_revenue(update: Update, context: CallbackContext):
-    """Обработчик ввода общей выручки для смен до 21:00"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['total_revenue'] = float(revenue_text)
-    context.user_data['awaiting_total_revenue'] = False
-    context.user_data['awaiting_hours'] = True
-    
-    await update.message.reply_text("⏰ Введите количество отработанных часов:")
-
-async def handle_hours_input(update: Update, context: CallbackContext):
-    hours_text = update.message.text
-    
-    if not validate_hours(hours_text):
-        await update.message.reply_text("❌ Неверное количество часов! Введите число до 14:")
-        return
-    
-    context.user_data['hours'] = float(hours_text)
-    context.user_data['awaiting_hours'] = False
-    
-    # Расчет заработка
-    user_id = update.effective_user.id
-    user = db.get_user_by_id(user_id)
-    
-    if user.percent == 1:
-        # Старая логика для 1%
-        context.user_data['awaiting_end_revenue'] = True
-        await update.message.reply_text("💵 Введите выручку за смену:")
-    else:
-        # Новая логика для 2% - сразу расчет
-        await calculate_and_show_salary_2percent(update, context)
-
-async def calculate_and_show_salary_2percent(update: Update, context: CallbackContext):
-    """Расчет и показ зарплаты для 2% пользователей"""
-    user_id = update.effective_user.id
-    user = db.get_user_by_id(user_id)
-    
-    # Подготавливаем данные о выручке
-    revenue_data = {}
-    shift_type = context.user_data.get('shift_type')
-    
-    if shift_type == '8_20' and context.user_data.get('had_break'):
-        revenue_data = {
-            'revenue_come1': context.user_data.get('revenue_come1', 0),
-            'revenue_leave1': context.user_data.get('revenue_leave1', 0),
-            'revenue_come2': context.user_data.get('revenue_come2', 0),
-            'revenue_leave2': context.user_data.get('revenue_leave2', 0)
-        }
-    elif shift_type and shift_type != '8_20':
-        revenue_data = {
-            'revenue_come1': context.user_data.get('revenue_come1', 0),
-            'revenue_leave1': context.user_data.get('revenue_leave1', 0),
-            'revenue_come2': context.user_data.get('revenue_come2', 0),
-            'total_revenue': context.user_data.get('total_revenue', 0)
-        }
-    else:
-        # Для случаев без перерыва или старая логика
-        revenue_data = {
-            'start_revenue': context.user_data.get('start_revenue', 0),
-            'end_revenue': context.user_data.get('end_revenue', 0)
-        }
-    
-    salary_details = calculate_salary(
-        context.user_data['hours'],
-        user.hourly_rate,
-        user.percent,
-        revenue_data,
-        context.user_data.get('shift_type')
-    )
-    
-    context.user_data['salary_details'] = salary_details
-    
-    # Форматируем детализацию
-    shift_date = context.user_data.get('selected_shift_date', date.today())
-    response_text = f"📅 Смена за {shift_date.strftime('%d.%m.%Y')}\n"
-    
-    if user.percent == 2 and context.user_data.get('shift_type'):
-        shift_name = SHIFT_TYPES[context.user_data['shift_type']]['name']
-        response_text += f"🕐 Тип смены: {shift_name}\n"
-        
-        if context.user_data.get('had_break') is not None:
-            break_status = "да" if context.user_data['had_break'] else "нет"
-            response_text += f"🔄 Уход со смены: {break_status}\n"
-    
-    response_text += format_salary_details(salary_details)
+    # Очищаем временные данные
+    context.user_data.pop('available_shifts', None)
     
     await update.message.reply_text(
-        response_text,
-        reply_markup=get_confirmation_keyboard()
+        f"📅 Выбрана смена за {selected_shift.date.strftime('%d.%m.%Y')}\n\n"
+        f"⏰ Введите количество отработанных часов (до 14):"
     )
-
-# Обновляем handle_dynamic_input в bot/main.py
-async def handle_dynamic_input(self, update: Update, context: CallbackContext):
-    user_data = context.user_data
-    user_input = update.message.text
-    
-    # Логируем ввод пользователя
-    user = update.effective_user
-    logger.info(f"USER: {user.id} ({user.first_name} @{user.username}) | INPUT: {user_input}")
-    
-    # Добавляем новые состояния
-    if user_data.get('awaiting_shift_type'):
-        await self.handle_shift_type_selection(update, context)
-    elif user_data.get('awaiting_break_question'):
-        await self.handle_break_question(update, context)
-    elif user_data.get('awaiting_revenue_come1'):
-        await self.handle_revenue_come1(update, context)
-    elif user_data.get('awaiting_revenue_leave1'):
-        await self.handle_revenue_leave1(update, context)
-    elif user_data.get('awaiting_revenue_come2'):
-        await self.handle_revenue_come2(update, context)
-    elif user_data.get('awaiting_revenue_leave2'):
-        await self.handle_revenue_leave2(update, context)
-    elif user_data.get('awaiting_total_revenue'):
-        await self.handle_total_revenue(update, context)
-    elif user_data.get('awaiting_key'):
-        await handle_registration_key(update, context)
-    elif user_data.get('awaiting_rate'):
-        await handle_hourly_rate(update, context)
-    elif user_data.get('awaiting_percent'):
-        await handle_percent(update, context)
-    elif user_data.get('awaiting_shift_date'):
-        await handle_shift_date(update, context)
-    elif user_data.get('awaiting_shift_delete'):
-        await handle_shift_delete(update, context)
-    elif user_data.get('awaiting_hours'):
-        await handle_hours_input(update, context)
-    elif user_data.get('awaiting_start_revenue'):
-        await handle_start_revenue(update, context)
-    elif user_data.get('awaiting_end_revenue'):
-        await handle_end_revenue(update, context)
-    elif user_data.get('awaiting_period'):
-        await handle_period_input(update, context)
-    else:
-        logger.info(f"USER: {user.id} | UNKNOWN_COMMAND: {user_input}")
-        await update.message.reply_text("Используйте меню для навигации.")
 
 async def handle_hours_input(update: Update, context: CallbackContext):
     hours_text = update.message.text
@@ -432,35 +162,16 @@ async def confirm_salary_handler(update: Update, context: CallbackContext):
         shift = session.query(Shift).filter_by(id=shift_id).first()
         if shift:
             shift.hours_worked = salary_details['hours']
+            shift.start_revenue = salary_details.get('start_revenue', 0)
+            shift.end_revenue = salary_details['end_revenue']
             shift.calculated_salary = salary_details['total_salary']
             shift.salary_details = str(salary_details)
             shift.is_completed = True
-            
-            # Сохраняем новые поля для 2% пользователей
-            if 'shift_type' in salary_details:
-                shift.shift_type = salary_details['shift_type']
-            
-            # Сохраняем данные о выручке
-            if 'revenue_come1' in salary_details:
-                shift.revenue_come1 = salary_details['revenue_come1']
-            if 'revenue_leave1' in salary_details:
-                shift.revenue_leave1 = salary_details['revenue_leave1']
-            if 'revenue_come2' in salary_details:
-                shift.revenue_come2 = salary_details['revenue_come2']
-            if 'revenue_leave2' in salary_details:
-                shift.revenue_leave2 = salary_details['revenue_leave2']
-            if 'total_revenue' in salary_details:
-                shift.total_revenue = salary_details['total_revenue']
-            
-            # Сохраняем информацию о перерыве
-            if context.user_data.get('had_break') is not None:
-                shift.had_break = context.user_data['had_break']
-            
             session.commit()
             
             # Логируем успешное сохранение
             logger.info(f"USER: {update.effective_user.id} | SHIFT_COMPLETED: "
-                       f"date={shift.date}, type={shift.shift_type}, salary={salary_details['total_salary']:.2f}")
+                       f"date={shift.date}, salary={salary_details['total_salary']:.2f}")
     except Exception as e:
         session.rollback()
         logger.error(f"USER: {update.effective_user.id} | SHIFT_SAVE_ERROR: {str(e)}")
@@ -619,142 +330,3 @@ async def payment_history_handler(update: Update, context: CallbackContext):
     history_text += f"💰 **Всего заработано за {len(completed_shifts)} смен: {total_earned:.2f} руб.**"
     
     await update.message.reply_text(history_text, parse_mode='Markdown')
-
-# Добавьте эти импорты в начало файла
-from bot.handlers.registration import handle_registration_key, handle_hourly_rate, handle_percent
-from bot.handlers.shifts import handle_shift_date, handle_shift_delete
-
-# Добавьте эти новые функции в конец файла salary.py
-async def handle_shift_type_selection(update: Update, context: CallbackContext):
-    """Обработчик выбора типа смены для 2% пользователей"""
-    user_input = update.message.text
-    user_id = update.effective_user.id
-    
-    # Маппинг текста кнопок на типы смен
-    shift_type_map = {
-        '🕗 8:00-20:00': '8_20',
-        '🕗 8:00-21:00': '8_21', 
-        '🕘 9:00-20:00': '9_20',
-        '🕘 9:00-21:00': '9_21'
-    }
-    
-    if user_input not in shift_type_map:
-        await update.message.reply_text("❌ Пожалуйста, выберите тип смены из предложенных вариантов:")
-        return
-    
-    shift_type = shift_type_map[user_input]
-    context.user_data['shift_type'] = shift_type
-    context.user_data['awaiting_shift_type'] = False
-    
-    # Для смены 8-20 спрашиваем об уходе со смены
-    if shift_type == '8_20':
-        context.user_data['awaiting_break_question'] = True
-        await update.message.reply_text(
-            "🔄 Уходили ли вы со смены на обед/перерыв?",
-            reply_markup=get_break_question_keyboard()
-        )
-    else:
-        # Для других типов смен переходим к вводу часов
-        context.user_data['awaiting_hours'] = True
-        suggested_hours = SHIFT_TYPES[shift_type]['hours']
-        await update.message.reply_text(
-            f"⏰ Введите количество отработанных часов (рекомендуется {suggested_hours}):"
-        )
-
-async def handle_break_question(update: Update, context: CallbackContext):
-    """Обработчик ответа на вопрос об уходе со смены"""
-    user_input = update.message.text
-    user_id = update.effective_user.id
-    
-    if user_input == '✅ Да, уходил':
-        context.user_data['had_break'] = True
-        context.user_data['awaiting_revenue_come1'] = True
-        await update.message.reply_text("💵 Введите выручку при приходе на смену:")
-    elif user_input == '❌ Нет, не уходил':
-        context.user_data['had_break'] = False
-        context.user_data['awaiting_hours'] = True
-        suggested_hours = SHIFT_TYPES[context.user_data['shift_type']]['hours']
-        await update.message.reply_text(
-            f"⏰ Введите количество отработанных часов (рекомендуется {suggested_hours}):"
-        )
-    else:
-        await update.message.reply_text("❌ Пожалуйста, ответьте да или нет:")
-        return
-    
-    context.user_data['awaiting_break_question'] = False
-
-async def handle_revenue_come1(update: Update, context: CallbackContext):
-    """Обработчик ввода первой выручки при приходе"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['revenue_come1'] = float(revenue_text)
-    context.user_data['awaiting_revenue_come1'] = False
-    context.user_data['awaiting_revenue_leave1'] = True
-    
-    await update.message.reply_text("💵 Введите выручку при уходе на перерыв:")
-
-async def handle_revenue_leave1(update: Update, context: CallbackContext):
-    """Обработчик ввода выручки при уходе"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['revenue_leave1'] = float(revenue_text)
-    context.user_data['awaiting_revenue_leave1'] = False
-    context.user_data['awaiting_revenue_come2'] = True
-    
-    await update.message.reply_text("💵 Введите выручку при возвращении с перерыва:")
-
-async def handle_revenue_come2(update: Update, context: CallbackContext):
-    """Обработчик ввода выручки при возвращении"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['revenue_come2'] = float(revenue_text)
-    context.user_data['awaiting_revenue_come2'] = False
-    
-    shift_type = context.user_data.get('shift_type')
-    
-    if shift_type == '8_20':
-        context.user_data['awaiting_revenue_leave2'] = True
-        await update.message.reply_text("💵 Введите выручку при окончательном уходе:")
-    else:
-        context.user_data['awaiting_total_revenue'] = True
-        await update.message.reply_text("💵 Введите общую выручку за смену:")
-
-async def handle_revenue_leave2(update: Update, context: CallbackContext):
-    """Обработчик ввода окончательной выручки для смены 8-20"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['revenue_leave2'] = float(revenue_text)
-    context.user_data['awaiting_revenue_leave2'] = False
-    context.user_data['awaiting_hours'] = True
-    
-    await update.message.reply_text("⏰ Введите количество отработанных часов:")
-
-async def handle_total_revenue(update: Update, context: CallbackContext):
-    """Обработчик ввода общей выручки для смен до 21:00"""
-    revenue_text = update.message.text
-    
-    if not validate_revenue(revenue_text):
-        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
-        return
-    
-    context.user_data['total_revenue'] = float(revenue_text)
-    context.user_data['awaiting_total_revenue'] = False
-    context.user_data['awaiting_hours'] = True
-    
-    await update.message.reply_text("⏰ Введите количество отработанных часов:")

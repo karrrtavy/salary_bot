@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Boolean, Text
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, date
 import json
@@ -45,7 +45,7 @@ class Shift(Base):
     revenue_leave2 = Column(Float)   # Выручка при окончательном уходе
     total_revenue = Column(Float)    # Общая выручка (для смен до 21:00)
     had_break = Column(Boolean)      # Был ли перерыв
-    salary_details = Column(String)  # JSON с детализацией
+    salary_details = Column(Text)    # Изменено на Text для больших JSON
     calculated_salary = Column(Float)
     is_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
