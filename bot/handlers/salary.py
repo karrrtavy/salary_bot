@@ -3,19 +3,9 @@ from telegram.ext import CallbackContext
 from bot.database import Database
 from bot.utils import calculate_salary, format_salary_details, validate_hours, validate_revenue
 from bot.utils import validate_period_format, parse_period, format_period_report, get_suggested_periods
-from bot.keyboards import get_confirmation_keyboard, get_main_menu, get_periods_keyboard
+from bot.keyboards import get_confirmation_keyboard, get_main_menu, get_periods_keyboard, get_shift_selection_keyboard, get_shift_types_keyboard
 from bot.models import Shift
-from datetime import datetime
-
-db = Database()
-
-from telegram import Update
-from telegram.ext import CallbackContext
-from bot.database import Database
-from bot.utils import calculate_salary, format_salary_details, validate_hours, validate_revenue
-from bot.utils import validate_period_format, parse_period, format_period_report, get_suggested_periods
-from bot.keyboards import get_confirmation_keyboard, get_main_menu, get_periods_keyboard, get_shift_selection_keyboard
-from bot.models import Shift
+from bot.config import SHIFT_TYPES
 from datetime import datetime, date
 import logging
 
@@ -31,7 +21,6 @@ async def salary_handler(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Сначала зарегистрируйтесь!")
         return
     
-    # Получаем все незавершенные смены пользователя
     shifts = db.get_user_shifts(user_id)
     incomplete_shifts = [shift for shift in shifts if not shift.is_completed and shift.date <= date.today()]
     
@@ -43,10 +32,8 @@ async def salary_handler(update: Update, context: CallbackContext):
         )
         return
     
-    # Сохраняем список смен в user_data для последующего использования
     context.user_data['available_shifts'] = incomplete_shifts
     
-    # Создаем клавиатуру для выбора смены
     keyboard = get_shift_selection_keyboard(incomplete_shifts)
     
     await update.message.reply_text(
@@ -55,12 +42,10 @@ async def salary_handler(update: Update, context: CallbackContext):
     )
 
 async def handle_shift_selection(update: Update, context: CallbackContext):
-    """Обработчик выбора конкретной смены"""
     user_input = update.message.text
     user_id = update.effective_user.id
     user = db.get_user_by_id(user_id)
     
-    # Логируем выбор пользователя
     logger.info(f"USER: {user_id} | SHIFT_SELECTION: {user_input}")
     
     shifts = context.user_data.get('available_shifts', [])
@@ -71,8 +56,7 @@ async def handle_shift_selection(update: Update, context: CallbackContext):
         today = date.today()
         selected_shift = next((shift for shift in shifts if shift.date == today), None)
     elif user_input.startswith("📋 "):
-        # Извлекаем дату из текста кнопки (формат: "📋 03.11.2025")
-        date_str = user_input[3:]  # Убираем "📋 "
+        date_str = user_input[3:]
         try:
             selected_date = datetime.strptime(date_str, '%d.%m.%Y').date()
             selected_shift = next((shift for shift in shifts if shift.date == selected_date), None)
@@ -84,18 +68,56 @@ async def handle_shift_selection(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Выбранная смена не найдена!")
         return
     
-    # Сохраняем выбранную смену в контексте
     context.user_data['current_shift_id'] = selected_shift.id
     context.user_data['selected_shift_date'] = selected_shift.date
-    context.user_data['awaiting_hours'] = True
     
-    # Очищаем временные данные
+    # Для пользователей с 2% показываем выбор типа смены
+    if user.percent == 2:
+        context.user_data['awaiting_shift_type'] = True
+        await update.message.reply_text(
+            "🕒 Выберите тип смены:",
+            reply_markup=get_shift_types_keyboard()
+        )
+    else:
+        context.user_data['awaiting_hours'] = True
+        await update.message.reply_text(
+            f"📅 Выбрана смена за {selected_shift.date.strftime('%d.%m.%Y')}\n\n"
+            f"⏰ Введите количество отработанных часов (до 14):"
+        )
+    
     context.user_data.pop('available_shifts', None)
+
+async def handle_shift_type_selection(update: Update, context: CallbackContext):
+    """Обработчик выбора типа смены для 2% пользователей"""
+    user_input = update.message.text
+    user_id = update.effective_user.id
     
-    await update.message.reply_text(
-        f"📅 Выбрана смена за {selected_shift.date.strftime('%d.%m.%Y')}\n\n"
-        f"⏰ Введите количество отработанных часов (до 14):"
-    )
+    # Извлекаем тип смены из текста (формат: "8-20 (12 часов)")
+    shift_type = user_input.split(' ')[0]
+    
+    if shift_type not in SHIFT_TYPES:
+        await update.message.reply_text("❌ Неверный тип смены! Выберите из предложенных:")
+        return
+    
+    context.user_data['shift_type'] = shift_type
+    context.user_data['awaiting_shift_type'] = False
+    
+    shift_info = SHIFT_TYPES[shift_type]
+    
+    if shift_info['needs_break']:
+        # Смена с перерывом
+        context.user_data['awaiting_start_revenue_1'] = True
+        await update.message.reply_text(
+            f"📋 Выбрана смена: {shift_type}\n\n"
+            f"💵 Введите выручку при начале смены:"
+        )
+    else:
+        # Смена без перерыва
+        context.user_data['awaiting_total_revenue'] = True
+        await update.message.reply_text(
+            f"📋 Выбрана смена: {shift_type}\n\n"
+            f"💵 Введите общую выручку за смену:"
+        )
 
 async def handle_hours_input(update: Update, context: CallbackContext):
     hours_text = update.message.text
@@ -116,6 +138,130 @@ async def handle_hours_input(update: Update, context: CallbackContext):
     else:
         context.user_data['awaiting_start_revenue'] = True
         await update.message.reply_text("💵 Введите начальную выручку (при начале смены):")
+
+async def handle_start_revenue_1(update: Update, context: CallbackContext):
+    """Обработчик первой выручки для 2% с перерывом"""
+    revenue_text = update.message.text
+    
+    if not validate_revenue(revenue_text):
+        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
+        return
+    
+    context.user_data['start_revenue_1'] = float(revenue_text)
+    context.user_data['awaiting_start_revenue_1'] = False
+    context.user_data['awaiting_end_revenue_1'] = True
+    
+    await update.message.reply_text("💵 Введите выручку при уходе на перерыв:")
+
+async def handle_end_revenue_1(update: Update, context: CallbackContext):
+    """Обработчик выручки при уходе на перерыв"""
+    revenue_text = update.message.text
+    
+    if not validate_revenue(revenue_text):
+        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
+        return
+    
+    context.user_data['end_revenue_1'] = float(revenue_text)
+    context.user_data['awaiting_end_revenue_1'] = False
+    context.user_data['awaiting_start_revenue_2'] = True
+    
+    await update.message.reply_text("💵 Введите выручку при возвращении с перерыва:")
+
+async def handle_start_revenue_2(update: Update, context: CallbackContext):
+    """Обработчик выручки при возвращении с перерыва"""
+    revenue_text = update.message.text
+    
+    if not validate_revenue(revenue_text):
+        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
+        return
+    
+    context.user_data['start_revenue_2'] = float(revenue_text)
+    context.user_data['awaiting_start_revenue_2'] = False
+    context.user_data['awaiting_end_revenue_2'] = True
+    
+    await update.message.reply_text("💵 Введите выручку в конце смены (общую):")
+
+async def handle_end_revenue_2(update: Update, context: CallbackContext):
+    """Обработчик общей выручки для 2% с перерывом"""
+    revenue_text = update.message.text
+    
+    if not validate_revenue(revenue_text):
+        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
+        return
+    
+    context.user_data['end_revenue_2'] = float(revenue_text)
+    context.user_data['awaiting_end_revenue_2'] = False
+    
+    # Расчет заработка для 2% с перерывом
+    await calculate_2_percent_salary_with_break(update, context)
+
+async def handle_total_revenue(update: Update, context: CallbackContext):
+    """Обработчик общей выручки для 2% без перерыва"""
+    revenue_text = update.message.text
+    
+    if not validate_revenue(revenue_text):
+        await update.message.reply_text("❌ Неверная сумма! Введите число до 200000:")
+        return
+    
+    context.user_data['total_revenue'] = float(revenue_text)
+    context.user_data['awaiting_total_revenue'] = False
+    
+    # Расчет заработка для 2% без перерыва
+    await calculate_2_percent_salary_without_break(update, context)
+
+async def calculate_2_percent_salary_with_break(update: Update, context: CallbackContext):
+    """Расчет зарплаты для 2% с перерывом"""
+    user_id = update.effective_user.id
+    user = db.get_user_by_id(user_id)
+    
+    shift_type = context.user_data['shift_type']
+    hours = SHIFT_TYPES[shift_type]['hours']
+    
+    salary_details = calculate_salary(
+        hours=hours,
+        hourly_rate=user.hourly_rate,
+        percent=2,
+        shift_type=shift_type,
+        start_revenue=context.user_data['start_revenue_1'],
+        end_revenue=context.user_data['end_revenue_1'],
+        break_start_revenue=context.user_data['start_revenue_2'],
+        break_end_revenue=context.user_data['end_revenue_2'],
+        total_revenue=context.user_data['end_revenue_2']
+    )
+    
+    context.user_data['salary_details'] = salary_details
+    shift_date = context.user_data.get('selected_shift_date', date.today())
+    
+    await update.message.reply_text(
+        f"📅 Смена за {shift_date.strftime('%d.%m.%Y')}\n"
+        f"{format_salary_details(salary_details)}",
+        reply_markup=get_confirmation_keyboard()
+    )
+
+async def calculate_2_percent_salary_without_break(update: Update, context: CallbackContext):
+    """Расчет зарплаты для 2% без перерыва"""
+    user_id = update.effective_user.id
+    user = db.get_user_by_id(user_id)
+    
+    shift_type = context.user_data['shift_type']
+    hours = SHIFT_TYPES[shift_type]['hours']
+    
+    salary_details = calculate_salary(
+        hours=hours,
+        hourly_rate=user.hourly_rate,
+        percent=2,
+        shift_type=shift_type,
+        total_revenue=context.user_data['total_revenue']
+    )
+    
+    context.user_data['salary_details'] = salary_details
+    shift_date = context.user_data.get('selected_shift_date', date.today())
+    
+    await update.message.reply_text(
+        f"📅 Смена за {shift_date.strftime('%d.%m.%Y')}\n"
+        f"{format_salary_details(salary_details)}",
+        reply_markup=get_confirmation_keyboard()
+    )
 
 async def handle_start_revenue(update: Update, context: CallbackContext):
     revenue_text = update.message.text
@@ -341,3 +487,45 @@ async def payment_history_handler(update: Update, context: CallbackContext):
     history_text += f"💰 **Всего заработано за {len(completed_shifts)} смен: {total_earned:.2f} руб.**"
     
     await update.message.reply_text(history_text, parse_mode='Markdown')
+
+async def handle_dynamic_input(self, update: Update, context: CallbackContext):
+    user_data = context.user_data
+    user_input = update.message.text
+    
+    user = update.effective_user
+    logger.info(f"USER: {user.id} ({user.first_name} @{user.username}) | INPUT: {user_input}")
+    
+    # Добавляем новые состояния для 2% пользователей
+    if user_data.get('awaiting_shift_type'):
+        await handle_shift_type_selection(update, context)
+    elif user_data.get('awaiting_start_revenue_1'):
+        await handle_start_revenue_1(update, context)
+    elif user_data.get('awaiting_end_revenue_1'):
+        await handle_end_revenue_1(update, context)
+    elif user_data.get('awaiting_start_revenue_2'):
+        await handle_start_revenue_2(update, context)
+    elif user_data.get('awaiting_end_revenue_2'):
+        await handle_end_revenue_2(update, context)
+    elif user_data.get('awaiting_total_revenue'):
+        await handle_total_revenue(update, context)
+    elif user_data.get('awaiting_key'):
+        await handle_registration_key(update, context)
+    elif user_data.get('awaiting_rate'):
+        await handle_hourly_rate(update, context)
+    elif user_data.get('awaiting_percent'):
+        await handle_percent(update, context)
+    elif user_data.get('awaiting_shift_date'):
+        await handle_shift_date(update, context)
+    elif user_data.get('awaiting_shift_delete'):
+        await handle_shift_delete(update, context)
+    elif user_data.get('awaiting_hours'):
+        await handle_hours_input(update, context)
+    elif user_data.get('awaiting_start_revenue'):
+        await handle_start_revenue(update, context)
+    elif user_data.get('awaiting_end_revenue'):
+        await handle_end_revenue(update, context)
+    elif user_data.get('awaiting_period'):
+        await handle_period_input(update, context)
+    else:
+        logger.info(f"USER: {user.id} | UNKNOWN_COMMAND: {user_input}")
+        await update.message.reply_text("Используйте меню для навигации.")
