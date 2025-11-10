@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, extract, and_, desc, inspect
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.pool import StaticPool
 from .config import DATABASE_URL
 from .models import Base, User, RegistrationKey, Shift, PaymentPeriod
 import secrets
@@ -11,13 +12,24 @@ logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
-        # Используем PostgreSQL connection pool
-        self.engine = create_engine(
-            DATABASE_URL,
-            pool_size=10,
-            max_overflow=20,
-            pool_pre_ping=True  # Проверяем соединение перед использованием
-        )
+        # Определяем параметры движка в зависимости от типа БД
+        if DATABASE_URL.startswith('postgresql'):
+            # PostgreSQL - используем пул соединений
+            self.engine = create_engine(
+                DATABASE_URL,
+                pool_size=10,
+                max_overflow=20,
+                pool_pre_ping=True
+            )
+            logger.info("🔗 Используется PostgreSQL с пулом соединений")
+        else:
+            # SQLite - без пула соединений
+            self.engine = create_engine(
+                DATABASE_URL,
+                connect_args={"check_same_thread": False} if DATABASE_URL.startswith('sqlite') else {}
+            )
+            logger.info("🔗 Используется SQLite")
+        
         self.Session = sessionmaker(bind=self.engine)
         
         self._safe_initialize()
@@ -44,29 +56,32 @@ class Database:
 
     def _add_missing_columns(self):
         """Добавляем отсутствующие колонки в существующие таблицы"""
-        inspector = inspect(self.engine)
-        
-        # Проверяем таблицу shifts на наличие новых колонок
-        if 'shifts' in inspector.get_table_names():
-            existing_columns = [col['name'] for col in inspector.get_columns('shifts')]
-            logger.info(f"🔍 Существующие колонки в shifts: {existing_columns}")
+        try:
+            inspector = inspect(self.engine)
             
-            # Список необходимых колонок
-            required_columns = ['shift_type', 'break_start_revenue', 'break_end_revenue', 'total_revenue']
-            
-            for column in required_columns:
-                if column not in existing_columns:
-                    logger.info(f"📋 Добавляем отсутствующую колонку: {column}")
-                    try:
-                        with self.engine.connect() as conn:
-                            if column == 'shift_type':
-                                conn.execute(f'ALTER TABLE shifts ADD COLUMN {column} VARCHAR')
-                            else:
-                                conn.execute(f'ALTER TABLE shifts ADD COLUMN {column} FLOAT')
-                            conn.commit()
-                        logger.info(f"✅ Колонка {column} добавлена")
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка при добавлении колонки {column}: {e}")
+            # Проверяем таблицу shifts на наличие новых колонок
+            if 'shifts' in inspector.get_table_names():
+                existing_columns = [col['name'] for col in inspector.get_columns('shifts')]
+                logger.info(f"🔍 Существующие колонки в shifts: {existing_columns}")
+                
+                # Список необходимых колонок
+                required_columns = ['shift_type', 'break_start_revenue', 'break_end_revenue', 'total_revenue']
+                
+                for column in required_columns:
+                    if column not in existing_columns:
+                        logger.info(f"📋 Добавляем отсутствующую колонку: {column}")
+                        try:
+                            with self.engine.connect() as conn:
+                                if column == 'shift_type':
+                                    conn.execute(f'ALTER TABLE shifts ADD COLUMN {column} VARCHAR')
+                                else:
+                                    conn.execute(f'ALTER TABLE shifts ADD COLUMN {column} FLOAT')
+                                conn.commit()
+                            logger.info(f"✅ Колонка {column} добавлена")
+                        except Exception as e:
+                            logger.error(f"❌ Ошибка при добавлении колонки {column}: {e}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при проверке колонок: {e}")
 
     def _initialize_keys(self):
         """Инициализация ключей только если их нет"""
