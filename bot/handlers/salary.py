@@ -508,16 +508,6 @@ async def handle_dynamic_input(self, update: Update, context: CallbackContext):
         await handle_end_revenue_2(update, context)
     elif user_data.get('awaiting_total_revenue'):
         await handle_total_revenue(update, context)
-    elif user_data.get('awaiting_key'):
-        await handle_registration_key(update, context)
-    elif user_data.get('awaiting_rate'):
-        await handle_hourly_rate(update, context)
-    elif user_data.get('awaiting_percent'):
-        await handle_percent(update, context)
-    elif user_data.get('awaiting_shift_date'):
-        await handle_shift_date(update, context)
-    elif user_data.get('awaiting_shift_delete'):
-        await handle_shift_delete(update, context)
     elif user_data.get('awaiting_hours'):
         await handle_hours_input(update, context)
     elif user_data.get('awaiting_start_revenue'):

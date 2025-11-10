@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine, extract, and_, desc, inspect
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import SQLAlchemyError
 from .config import DATABASE_URL
 from .models import Base, User, RegistrationKey, Shift, PaymentPeriod
 import secrets
@@ -10,32 +11,62 @@ logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
-        self.engine = create_engine(DATABASE_URL)
+        # Используем PostgreSQL connection pool
+        self.engine = create_engine(
+            DATABASE_URL,
+            pool_size=10,
+            max_overflow=20,
+            pool_pre_ping=True  # Проверяем соединение перед использованием
+        )
         self.Session = sessionmaker(bind=self.engine)
         
-        # НЕ создаем таблицы автоматически - проверяем существующие
         self._safe_initialize()
         self._initialize_keys()
 
     def _safe_initialize(self):
-        """Безопасная инициализация - создает только отсутствующие таблицы"""
+        """Безопасная инициализация - создает только отсутствующие таблицы и колонки"""
+        try:
+            inspector = inspect(self.engine)
+            existing_tables = inspector.get_table_names()
+            
+            logger.info(f"🔍 Найдены таблицы: {existing_tables}")
+            
+            # Создаем все таблицы (SQLAlchemy сама создаст только отсутствующие)
+            Base.metadata.create_all(self.engine)
+            logger.info("✅ Таблицы проверены/созданы")
+            
+            # Проверяем и добавляем отсутствующие колонки для существующих таблиц
+            self._add_missing_columns()
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка при инициализации БД: {e}")
+            raise e
+
+    def _add_missing_columns(self):
+        """Добавляем отсутствующие колонки в существующие таблицы"""
         inspector = inspect(self.engine)
-        existing_tables = inspector.get_table_names()
         
-        logger.info(f"🔍 Найдены таблицы: {existing_tables}")
-        
-        # Список необходимых таблиц
-        required_tables = ['users', 'registration_keys', 'shifts', 'payment_periods']
-        missing_tables = [table for table in required_tables if table not in existing_tables]
-        
-        if missing_tables:
-            logger.info(f"📋 Создаем отсутствующие таблицы: {missing_tables}")
-            # Создаем только отсутствующие таблицы
-            Base.metadata.create_all(self.engine, tables=[
-                Base.metadata.tables[table] for table in missing_tables
-            ])
-        else:
-            logger.info("✅ Все таблицы уже существуют")
+        # Проверяем таблицу shifts на наличие новых колонок
+        if 'shifts' in inspector.get_table_names():
+            existing_columns = [col['name'] for col in inspector.get_columns('shifts')]
+            logger.info(f"🔍 Существующие колонки в shifts: {existing_columns}")
+            
+            # Список необходимых колонок
+            required_columns = ['shift_type', 'break_start_revenue', 'break_end_revenue', 'total_revenue']
+            
+            for column in required_columns:
+                if column not in existing_columns:
+                    logger.info(f"📋 Добавляем отсутствующую колонку: {column}")
+                    try:
+                        with self.engine.connect() as conn:
+                            if column == 'shift_type':
+                                conn.execute(f'ALTER TABLE shifts ADD COLUMN {column} VARCHAR')
+                            else:
+                                conn.execute(f'ALTER TABLE shifts ADD COLUMN {column} FLOAT')
+                            conn.commit()
+                        logger.info(f"✅ Колонка {column} добавлена")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка при добавлении колонки {column}: {e}")
 
     def _initialize_keys(self):
         """Инициализация ключей только если их нет"""
@@ -66,6 +97,9 @@ class Database:
         session = self.Session()
         try:
             return session.query(User).filter_by(user_id=user_id).first()
+        except SQLAlchemyError as e:
+            logger.error(f"❌ Ошибка при получении пользователя {user_id}: {e}")
+            return None
         finally:
             session.close()
 
@@ -74,6 +108,9 @@ class Database:
         try:
             reg_key = session.query(RegistrationKey).filter_by(key=key, is_used=False).first()
             return reg_key is not None
+        except SQLAlchemyError as e:
+            logger.error(f"❌ Ошибка при проверке ключа {key}: {e}")
+            return False
         finally:
             session.close()
 
@@ -88,6 +125,10 @@ class Database:
                 session.commit()
                 return True
             return False
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"❌ Ошибка при использовании ключа {key}: {e}")
+            return False
         finally:
             session.close()
 
@@ -101,6 +142,9 @@ class Database:
                     extract('year', Shift.date) == year
                 )
             return query.order_by(Shift.date).all()
+        except SQLAlchemyError as e:
+            logger.error(f"❌ Ошибка при получении смен пользователя {user_id}: {e}")
+            return []
         finally:
             session.close()
 
@@ -112,6 +156,9 @@ class Database:
                 Shift.user_id == user_id,
                 Shift.is_completed == True
             ).order_by(Shift.date.desc()).limit(limit).all()
+        except SQLAlchemyError as e:
+            logger.error(f"❌ Ошибка при получении завершенных смен пользователя {user_id}: {e}")
+            return []
         finally:
             session.close()
 
@@ -125,6 +172,9 @@ class Database:
                 extract('year', Shift.date) <= current_date.year
             ).delete()
             session.commit()
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"❌ Ошибка при удалении старых смен: {e}")
         finally:
             session.close()
     
@@ -138,6 +188,9 @@ class Database:
                 Shift.date <= end_date,
                 Shift.is_completed == True
             ).order_by(Shift.date).all()
+        except SQLAlchemyError as e:
+            logger.error(f"❌ Ошибка при получении смен за период пользователя {user_id}: {e}")
+            return []
         finally:
             session.close()
 
@@ -159,6 +212,7 @@ class Database:
             return payment_period
         except Exception as e:
             session.rollback()
+            logger.error(f"❌ Ошибка при создании периода выплаты: {e}")
             raise e
         finally:
             session.close()
@@ -168,6 +222,9 @@ class Database:
         session = self.Session()
         try:
             return session.query(PaymentPeriod).filter_by(user_id=user_id).order_by(PaymentPeriod.created_at.desc()).limit(limit).all()
+        except SQLAlchemyError as e:
+            logger.error(f"❌ Ошибка при получении периодов выплат пользователя {user_id}: {e}")
+            return []
         finally:
             session.close()
 
@@ -180,6 +237,9 @@ class Database:
                 PaymentPeriod.start_date <= period_date,
                 PaymentPeriod.end_date >= period_date
             ).first()
+        except SQLAlchemyError as e:
+            logger.error(f"❌ Ошибка при получении периода по дате: {e}")
+            return None
         finally:
             session.close()
 
@@ -192,5 +252,8 @@ class Database:
                 extract('month', PaymentPeriod.start_date) == month,
                 extract('year', PaymentPeriod.start_date) == year
             ).order_by(PaymentPeriod.period_number).all()
+        except SQLAlchemyError as e:
+            logger.error(f"❌ Ошибка при получении периодов по месяцу: {e}")
+            return []
         finally:
             session.close()
