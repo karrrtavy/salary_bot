@@ -1,6 +1,7 @@
 from bot.database import Database
 from bot.models import Base
 import logging
+from sqlalchemy import inspect
 
 logger = logging.getLogger(__name__)
 
@@ -9,8 +10,8 @@ def migrate_database():
     db = Database()
     engine = db.engine
     
-    # Проверяем существующие колонки
-    inspector = db.inspect(engine)
+    # Используем правильный способ получения инспектора
+    inspector = inspect(engine)
     existing_columns = [col['name'] for col in inspector.get_columns('shifts')]
     
     logger.info(f"🔍 Существующие колонки в shifts: {existing_columns}")
